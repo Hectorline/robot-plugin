@@ -1,21 +1,19 @@
 package amailp.intellij.robot.extensions
 
-import com.intellij.codeInsight.completion._
-import com.intellij.patterns.PlatformPatterns
-import com.intellij.util.ProcessingContext
-import com.intellij.codeInsight.lookup.{LookupElement, AutoCompletionPolicy, LookupElementBuilder}
-import amailp.intellij.robot.elements.RobotTokenTypes
-import amailp.intellij.robot.psi._
-import com.jetbrains.python.psi.stubs.{PyModuleNameIndex, PyClassNameIndex}
-import scala.collection.JavaConversions._
-import amailp.intellij.robot.file.Icons
-import icons.PythonIcons.Python.Python
-import amailp.intellij.robot.psi.utils.ExtRobotPsiUtils
-import com.intellij.psi.PsiElement
-import com.jetbrains.python.psi._
 import javax.swing.Icon
-import com.jetbrains.python.{PyNames, PythonFileType}
-import com.jetbrains.python.psi.impl.PyPsiUtils._
+
+import amailp.intellij.robot.elements.RobotTokenTypes
+import amailp.intellij.robot.matchers
+import amailp.intellij.robot.psi._
+import amailp.intellij.robot.psi.utils.ExtRobotPsiUtils
+import com.intellij.codeInsight.completion._
+import com.intellij.codeInsight.lookup.{AutoCompletionPolicy, LookupElement, LookupElementBuilder}
+import com.intellij.patterns.PlatformPatterns
+import com.intellij.psi.PsiElement
+import com.intellij.util.ProcessingContext
+import com.jetbrains.python.psi._
+
+import scala.collection.JavaConversions._
 
 class RobotLibrariesCompletionContributor extends CompletionContributor {
 
@@ -30,75 +28,20 @@ class RobotLibrariesCompletionContributor extends CompletionContributor {
       val psiUtils: ExtRobotPsiUtils = new ExtRobotPsiUtils {
         def utilsPsiElement: PsiElement = completionParameters.getOriginalPosition
       }
+      
+      def librariesInScope = psiUtils.currentRobotFile.getImportedLibraries
+      val lm = new matchers.Library(currentPsiElem)
+      import lm._
+
       //TODO rethink filtering, this maybe does not work well enough
       currentPsiElem.getParent.getParent.getParent match {
         case _: TestCaseDefinition | _: KeywordDefinition =>
           for {
             library: Library <- Iterable(BuiltInLibrary) ++ librariesInScope
-            lookupElements = lookupElementsForLibrary(library)
+            lookupElements = doForEachPyFunctionInLibrary(createLookupElement, library)
           } completionResultSet.addAllElements(lookupElements)
 
         case _ =>
-      }
-
-      def librariesInScope = psiUtils.currentRobotFile.getImportedLibraries
-
-      def lookupElementsForLibrary(library: Library): Seq[LookupElement] = {
-        val libraryName = library.getText
-
-        object WithSameNameClass {
-          def unapply(pyFile: PyFile): Option[PyClass] =
-            Option(pyFile.findTopLevelClass(pyFile.getVirtualFile.getNameWithoutExtension))
-        }
-
-        object PythonClassWithExactQName {
-          def unapply(name: String): Option[PyClass] = searchForClass(s"$name")
-        }
-
-        object PythonClassFromRobotLib {
-          def unapply(name: String): Option[PyClass] = searchForClass(s"robot.libraries.$name.$name")
-        }
-
-        object PythonClassSameNameAsModule {
-          def unapply(name: String): Option[PyClass] = {
-            val qNameComponents = name.split('.')
-            val className = (qNameComponents :+ qNameComponents.last).mkString(".")
-            searchForClass(className)
-          }
-        }
-
-        object LocalPythonFile {
-          def unapply(library: LibraryValue): Option[PyFile] = {
-            for {
-              virtualFile <- Option(library.currentDirectory.findFileByRelativePath(library.getText))
-              psiFile <- Option(psiUtils.psiManager.findFile(virtualFile))
-              if psiFile.getFileType == PythonFileType.INSTANCE
-            } yield psiFile.asInstanceOf[PyFile]
-          }
-        }
-
-        object InPathPythonFile {
-          def unapply(library: LibraryValue): Option[PyFile] =
-            PyModuleNameIndex.find(library.getText, currentPsiElem.getProject, true).headOption
-        }
-
-        object ClassName {
-          def unapply(library: Library): Option[String] =
-            Option(library.getText)
-        }
-
-        def searchForClass(qName: String) =
-          Option(PyClassNameIndex.findClass(qName, currentPsiElem.getProject))
-
-        library match {
-          case LocalPythonFile(WithSameNameClass(pyClass)) => lookupElementsFromMethods(libraryName, pyClass, Python)
-          case LocalPythonFile(pyFile) => lookupElementsFrom__all__(libraryName, pyFile, Python)
-          case ClassName(PythonClassWithExactQName(pyClass)) => lookupElementsFromMethods(libraryName, pyClass, Python)
-          case ClassName(PythonClassFromRobotLib(pyClass)) => lookupElementsFromMethods(libraryName, pyClass, Icons.robot)
-          case ClassName(PythonClassSameNameAsModule(pyClass)) => lookupElementsFromMethods(libraryName, pyClass, Python)
-          case InPathPythonFile(pyFile) => lookupElementsFrom__all__(libraryName, pyFile, Python)
-          case _ => Nil
-        }
       }
 
       def formatParameterName(parameter: PyParameter) = parameter match {
@@ -106,26 +49,7 @@ class RobotLibrariesCompletionContributor extends CompletionContributor {
         case p => p.getName
       }
 
-      def lookupElementsFromMethods(libName: String, baseClass: PyClass, icon: Icon): Seq[LookupElement] =
-        for {
-          method <- baseClass.getMethods(true)
-          if !method.getName.startsWith("_")
-        } yield createLookupElement(method, libName, drop = 1, icon)
-
-      def lookupElementsFrom__all__(libName: String, pyFile: PyFile, icon: Icon): Seq[LookupElement] =
-        for {
-          function <- getFunctionsFrom__all__(pyFile)
-          if !function.getName.startsWith("_")
-        } yield createLookupElement(function, libName, drop = 0, icon)
-
-      def getFunctionsFrom__all__(pyFile: PyFile): Seq[PyFunction] = {
-        val attributesNamedAll = getAttributeValuesFromFile(pyFile, PyNames.ALL).toArray(Array[PyExpression]())
-        for {
-          functionName <- getStringValues(attributesNamedAll).toIndexedSeq
-        } yield Option(pyFile.findTopLevelFunction(functionName))
-      }.flatten
-
-      def createLookupElement(function: PyFunction, libName: String, drop: Int, icon: Icon) = {
+      def createLookupElement(function: PyFunction, libName: String, drop: Int, icon: Icon): LookupElement = {
         val paramList = function.getParameterList
         LookupElementBuilder.create(function.getName.replace('_', ' '))
           .withCaseSensitivity(false)

@@ -2,15 +2,17 @@ package amailp.intellij.robot.psi.utils
 
 import com.intellij.psi.{PsiFileFactory, PsiManager, PsiElement}
 import com.intellij.psi.util.PsiTreeUtil
-import amailp.intellij.robot.psi.{ResourceValue, Keyword, KeywordDefinition, RobotPsiFile}
+import amailp.intellij.robot.psi._
 import amailp.intellij.robot.file.FileType
 import scala.collection.JavaConversions._
 
 trait ExtRobotPsiUtils {
   def utilsPsiElement: PsiElement
-  def currentRobotFile = PsiTreeUtil.getParentOfType(utilsPsiElement, classOf[RobotPsiFile])
+  def currentRobotFile = utilsPsiElement.getContainingFile.asInstanceOf[RobotPsiFile]
+//  def currentRobotFile = PsiTreeUtil.getParentOfType(utilsPsiElement, classOf[RobotPsiFile])
   def currentFile = currentRobotFile.getVirtualFile
-  def currentDirectory = currentFile.getParent
+  def currentOriginalFile = currentRobotFile.getOriginalFile.getVirtualFile
+  def currentDirectory = currentOriginalFile.getParent
   def psiManager = PsiManager.getInstance(utilsPsiElement.getProject)
 
   def createKeyword(name: String): Keyword = {

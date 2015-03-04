@@ -3,6 +3,7 @@
     <extensions defaultExtensionNs="com.intellij">
         <!-- Robot libraries completion -->
         <completion.contributor language="Robotframework" implementationClass="amailp.intellij.robot.extensions.RobotLibrariesCompletionContributor"/>
+        <psi.referenceContributor language="Robotframework" implementation="amailp.intellij.robot.extensions.PyKeywordDefinitionReferenceContributor"/>
     </extensions>
 
 </idea-plugin>
